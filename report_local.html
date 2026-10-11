@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQLite vs Turso benchmark</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --surface-2: #f4f3f0;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #77766f;
+  --grid: #e4e3de;
+  --border: #dcdbd5;
+  --s1: #2a78d6; /* sqlite */
+  --s2: #eb6834; /* turso */
+  --s3: #1baf7a; /* turso mvcc */
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --surface-2: #232321;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #96958b;
+    --grid: #2f2f2c;
+    --border: #3a3a36;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --surface-2: #232321;
+  --text-primary: #f0efec;
+  --text-secondary: #c3c2b7;
+  --text-muted: #96958b;
+  --grid: #2f2f2c;
+  --border: #3a3a36;
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+}
+* { box-sizing: border-box; }
+html { background: var(--surface-1); }
+body {
+  margin: 0; padding: 0 16px 64px;
+  background: var(--surface-1); color: var(--text-primary);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.wrap { max-width: 1120px; margin: 0 auto; }
+header { padding: 32px 0 8px; display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+h1 { font-size: 26px; line-height: 1.2; margin: 0 0 6px; font-weight: 650; letter-spacing: -0.01em; }
+h2 { font-size: 18px; margin: 40px 0 4px; font-weight: 650; }
+h3 { font-size: 14px; margin: 0 0 2px; font-weight: 600; }
+.sub, .muted { color: var(--text-secondary); margin: 0; }
+.muted { color: var(--text-muted); font-size: 12.5px; }
+.toolbar { display: flex; gap: 8px; }
+button {
+  font: inherit; color: var(--text-primary); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--text-muted); }
+button:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; margin: 14px 0 0; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 20px; }
+.tile { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+.tile .k { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 13px; }
+.tile .v { font-size: 38px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
+.notice { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; background: var(--surface-2); color: var(--text-secondary); }
+.notice b { color: var(--text-primary); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; margin-top: 14px; }
+.card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px 10px; min-width: 0; }
+.card p { margin: 0 0 8px; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; fill: var(--text-secondary); }
+svg text.val { fill: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+svg text.ratio { fill: var(--text-muted); font-weight: 400; }
+svg text.axis { fill: var(--text-muted); font-size: 11.5px; }
+svg .grid { stroke: var(--grid); stroke-width: 1; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin-top: 14px; }
+.chart-host { min-height: 240px; }
+.tablewrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--border); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+th { font-weight: 600; color: var(--text-secondary); background: var(--surface-2); font-size: 12.5px; position: sticky; top: 0; }
+tr:last-child td { border-bottom: 0; }
+tr.grp td { border-top: 2px solid var(--border); }
+td.best { font-weight: 650; color: var(--text-primary); }
+td.na { color: var(--text-muted); }
+.eng { display: inline-flex; align-items: center; gap: 7px; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--text-secondary); }
+ul.notes { margin: 8px 0 0; padding-left: 20px; color: var(--text-secondary); }
+ul.notes li { margin: 4px 0; }
+code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+.tip {
+  position: fixed; z-index: 10; display: none; pointer-events: none; max-width: 300px;
+  background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 20px rgba(0,0,0,.18); font-size: 12.5px;
+}
+.tip b { font-weight: 650; }
+.tip .row { display: flex; justify-content: space-between; gap: 16px; }
+.tip .row span:first-child { color: var(--text-secondary); }
+.tip .hd { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+@media (max-width: 520px) { h1 { font-size: 22px; } .tile .v { font-size: 32px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>SQLite vs Turso — benchmark report</h1>
+      <p class="sub" id="meta-line"></p>
+      <div class="legend" id="legend" aria-label="Legend"></div>
+    </div>
+    <div class="toolbar">
+      <button id="theme" type="button">Toggle theme</button>
+      <button id="dl" type="button">Download results.json</button>
+    </div>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+  <div id="failures"></div>
+
+  <h2>Throughput by workload</h2>
+  <p class="muted">Single connection, sequential. Longer bar = more operations per second. Each card has its own scale, so compare bars within a card.</p>
+  <div class="cards" id="cards"></div>
+
+  <h2>Latency &amp; detail</h2>
+  <p class="muted">Bold = best in its workload. Latency basis differs per workload (see the last column). Lower latency is better.</p>
+  <div class="tablewrap"><table id="seq-table"></table></div>
+
+  <h2>Concurrent mixed workload</h2>
+  <p class="muted" id="conc-desc"></p>
+  <div class="charts">
+    <div class="card"><h3>Total throughput</h3><p class="muted">Operations per second across all workers</p><div class="chart-host" id="c-ops"></div></div>
+    <div class="card"><h3>Read latency, p99</h3><p class="muted">Point read, lower is better</p><div class="chart-host" id="c-rp99"></div></div>
+    <div class="card"><h3>Write latency, p99</h3><p class="muted">Single-row UPDATE transaction including retries, lower is better</p><div class="chart-host" id="c-wp99"></div></div>
+  </div>
+  <div class="tablewrap"><table id="conc-table"></table></div>
+
+  <h2>Setup &amp; caveats</h2>
+  <details open>
+    <summary>Configuration</summary>
+    <div class="tablewrap"><table id="cfg-table"></table></div>
+  </details>
+  <details open>
+    <summary>Notes</summary>
+    <ul class="notes" id="notes"></ul>
+  </details>
+</div>
+
+<script>
+const D = {"meta":{"generated_unix":1791739413,"cpus":12,"os":"windows","arch":"x86_64","sqlite_version":"3.53.2","turso_version":"0.8.3-pre.1","db_dir":"C:\\Users\\asyong\\AppData\\Local\\Temp\\dbbench-vlhB8H","config":{"agg_runs":20,"autocommit_inserts":2000,"batch":1000,"conc_rows":50000,"concurrency":[1,2,4,8],"duration_secs":5,"range_scans":5000,"read_pct":80,"reads":50000,"rows":100000,"seed":42,"synchronous":"normal","updates":20000},"notes":[],"engines":[{"id":"sqlite","label":"SQLite","description":"SQLite 3.53.2 via rusqlite (bundled), WAL journal, one OS thread per worker"},{"id":"turso","label":"Turso","description":"Turso Database 0.8.3-pre.1, default journal, async tasks on tokio"},{"id":"turso-mvcc","label":"Turso (MVCC)","description":"Turso Database 0.8.3-pre.1, journal_mode=mvcc, BEGIN CONCURRENT writers"}]},"workloads":[{"engine":"sqlite","workload":"bulk_insert","title":"Bulk insert","description":"100000 rows (7 columns + secondary index) in 1000-row transactions","latency_basis":"per 1000-row transaction","unit":"rows/s","status":"ok","error":null,"metric":{"ops":100000,"secs":0.4367044,"ops_per_sec":228987.84624107293,"mean_us":4366.230000000001,"p50_us":2505.4,"p95_us":16712.0,"p99_us":20416.4,"max_us":20684.8,"errors":0,"retries":0}},{"engine":"sqlite","workload":"insert_autocommit","title":"Autocommit insert","description":"2000 single-row INSERTs, each its own transaction","latency_basis":"per INSERT (includes commit)","unit":"inserts/s","status":"ok","error":null,"metric":{"ops":2000,"secs":0.1036855,"ops_per_sec":19289.100211697874,"mean_us":51.78484999999999,"p50_us":19.8,"p95_us":54.8,"p99_us":120.4,"max_us":10888.0,"errors":0,"retries":0}},{"engine":"sqlite","workload":"point_read","title":"Point read","description":"50000 random primary-key lookups, all columns","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":50000,"secs":0.4981649,"ops_per_sec":100368.3719989104,"mean_us":9.921279999997527,"p50_us":8.399999999999999,"p95_us":17.200000000000003,"p99_us":27.0,"max_us":3945.5999999999995,"errors":0,"retries":0}},{"engine":"sqlite","workload":"range_scan","title":"Indexed range scan","description":"5000 range queries on indexed age (3-year window, LIMIT 100)","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":5000,"secs":0.2643727,"ops_per_sec":18912.69408679489,"mean_us":52.79978000000012,"p50_us":41.0,"p95_us":82.39999999999999,"p99_us":140.6,"max_us":905.0,"errors":0,"retries":0}},{"engine":"sqlite","workload":"update_batched","title":"Batched update","description":"20000 random-row UPDATEs touching an indexed column, 100 per transaction","latency_basis":"per 100-update transaction","unit":"updates/s","status":"ok","error":null,"metric":{"ops":20000,"secs":2.1403654,"ops_per_sec":9344.198892394728,"mean_us":10701.297499999999,"p50_us":3420.5,"p95_us":41510.7,"p99_us":56055.9,"max_us":61130.200000000004,"errors":0,"retries":0}},{"engine":"sqlite","workload":"aggregate_group_by","title":"Aggregate (GROUP BY)","description":"20 full-table GROUP BY country with COUNT, AVG, MAX","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":20,"secs":1.5182225,"ops_per_sec":13.173299697508105,"mean_us":75910.52,"p50_us":75769.0,"p95_us":82052.20000000001,"p99_us":86617.9,"max_us":86617.9,"errors":0,"retries":0}},{"engine":"sqlite","workload":"order_by_top_n","title":"Top-N sort","description":"20 full-scan ORDER BY balance DESC LIMIT 10 queries","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":20,"secs":0.5048663,"ops_per_sec":39.614448419314186,"mean_us":25242.935,"p50_us":25093.3,"p95_us":27264.9,"p99_us":32519.5,"max_us":32519.5,"errors":0,"retries":0}},{"engine":"turso","workload":"bulk_insert","title":"Bulk insert","description":"100000 rows (7 columns + secondary index) in 1000-row transactions","latency_basis":"per 1000-row transaction","unit":"rows/s","status":"ok","error":null,"metric":{"ops":100000,"secs":1.2242716,"ops_per_sec":81681.22171583495,"mean_us":12242.52,"p50_us":9766.5,"p95_us":28057.2,"p99_us":29908.899999999998,"max_us":33126.4,"errors":0,"retries":0}},{"engine":"turso","workload":"insert_autocommit","title":"Autocommit insert","description":"2000 single-row INSERTs, each its own transaction","latency_basis":"per INSERT (includes commit)","unit":"inserts/s","status":"ok","error":null,"metric":{"ops":2000,"secs":0.1751929,"ops_per_sec":11415.987748361948,"mean_us":87.47220000000002,"p50_us":41.0,"p95_us":146.7,"p99_us":230.20000000000002,"max_us":14942.199999999999,"errors":0,"retries":0}},{"engine":"turso","workload":"point_read","title":"Point read","description":"50000 random primary-key lookups, all columns","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":50000,"secs":0.5552616,"ops_per_sec":90047.64601045704,"mean_us":11.039907999998714,"p50_us":9.2,"p95_us":25.700000000000003,"p99_us":41.8,"max_us":821.3,"errors":0,"retries":0}},{"engine":"turso","workload":"range_scan","title":"Indexed range scan","description":"5000 range queries on indexed age (3-year window, LIMIT 100)","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":5000,"secs":0.4633973,"ops_per_sec":10789.877282409716,"mean_us":92.5980399999995,"p50_us":87.89999999999999,"p95_us":149.1,"p99_us":207.3,"max_us":1306.2,"errors":0,"retries":0}},{"engine":"turso","workload":"update_batched","title":"Batched update","description":"20000 random-row UPDATEs touching an indexed column, 100 per transaction","latency_basis":"per 100-update transaction","unit":"updates/s","status":"ok","error":null,"metric":{"ops":20000,"secs":3.2562484,"ops_per_sec":6142.0375669128925,"mean_us":16280.971000000001,"p50_us":6885.7,"p95_us":56407.2,"p99_us":64358.5,"max_us":97506.8,"errors":0,"retries":0}},{"engine":"turso","workload":"aggregate_group_by","title":"Aggregate (GROUP BY)","description":"20 full-table GROUP BY country with COUNT, AVG, MAX","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":20,"secs":1.6292878,"ops_per_sec":12.275302128942474,"mean_us":81464.075,"p50_us":79328.4,"p95_us":93329.8,"p99_us":105695.6,"max_us":105695.6,"errors":0,"retries":0}},{"engine":"turso","workload":"order_by_top_n","title":"Top-N sort","description":"20 full-scan ORDER BY balance DESC LIMIT 10 queries","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":20,"secs":1.3850561,"ops_per_sec":14.439848320945268,"mean_us":69252.45,"p50_us":67104.6,"p95_us":83956.8,"p99_us":89103.6,"max_us":89103.6,"errors":0,"retries":0}},{"engine":"turso-mvcc","workload":"bulk_insert","title":"Bulk insert","description":"100000 rows (7 columns + secondary index) in 1000-row transactions","latency_basis":"per 1000-row transaction","unit":"rows/s","status":"ok","error":null,"metric":{"ops":100000,"secs":2.7754045,"ops_per_sec":36030.78398121787,"mean_us":27753.877000000004,"p50_us":17127.0,"p95_us":21283.0,"p99_us":293151.3,"max_us":296560.9,"errors":0,"retries":0}},{"engine":"turso-mvcc","workload":"insert_autocommit","title":"Autocommit insert","description":"2000 single-row INSERTs, each its own transaction","latency_basis":"per INSERT (includes commit)","unit":"inserts/s","status":"ok","error":null,"metric":{"ops":2000,"secs":0.0942638,"ops_per_sec":21217.052569491152,"mean_us":46.984549999999935,"p50_us":47.9,"p95_us":63.6,"p99_us":93.8,"max_us":532.1,"errors":0,"retries":0}},{"engine":"turso-mvcc","workload":"point_read","title":"Point read","description":"50000 random primary-key lookups, all columns","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":50000,"secs":0.7601736,"ops_per_sec":65774.44941523884,"mean_us":15.139985999999652,"p50_us":11.600000000000001,"p95_us":33.9,"p99_us":56.5,"max_us":5172.0,"errors":0,"retries":0}},{"engine":"turso-mvcc","workload":"range_scan","title":"Indexed range scan","description":"5000 range queries on indexed age (3-year window, LIMIT 100)","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":5000,"secs":1.2305958,"ops_per_sec":4063.0725377089702,"mean_us":246.03435999999988,"p50_us":235.2,"p95_us":415.40000000000003,"p99_us":556.5,"max_us":2079.3,"errors":0,"retries":0}},{"engine":"turso-mvcc","workload":"update_batched","title":"Batched update","description":"20000 random-row UPDATEs touching an indexed column, 100 per transaction","latency_basis":"per 100-update transaction","unit":"updates/s","status":"ok","error":null,"metric":{"ops":20000,"secs":1.4344700000000001,"ops_per_sec":13942.43169951271,"mean_us":7172.1525,"p50_us":4915.700000000001,"p95_us":6999.6,"p99_us":9653.0,"max_us":430873.3,"errors":0,"retries":0}},{"engine":"turso-mvcc","workload":"aggregate_group_by","title":"Aggregate (GROUP BY)","description":"20 full-table GROUP BY country with COUNT, AVG, MAX","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":20,"secs":1.9139132,"ops_per_sec":10.449794692883668,"mean_us":95695.45000000001,"p50_us":95877.40000000001,"p95_us":103044.0,"p99_us":114327.2,"max_us":114327.2,"errors":0,"retries":0}},{"engine":"turso-mvcc","workload":"order_by_top_n","title":"Top-N sort","description":"20 full-scan ORDER BY balance DESC LIMIT 10 queries","latency_basis":"per query","unit":"queries/s","status":"ok","error":null,"metric":{"ops":20,"secs":1.7841993,"ops_per_sec":11.209510058657685,"mean_us":89209.71500000001,"p50_us":88778.4,"p95_us":94011.7,"p99_us":99970.7,"max_us":99970.7,"errors":0,"retries":0}}],"concurrency":[{"engine":"sqlite","workers":1,"status":"ok","error":null,"secs":5.0027536,"total_ops":301014,"ops_per_sec":60169.66336299273,"reads":{"ops":241014,"secs":5.0027536,"ops_per_sec":48176.26836548576,"mean_us":7.936695378695503,"p50_us":7.0,"p95_us":15.2,"p99_us":24.2,"max_us":643.8000000000001,"errors":0,"retries":0},"writes":{"ops":60000,"secs":5.0027536,"ops_per_sec":11993.394997506972,"mean_us":50.94526333333117,"p50_us":17.0,"p95_us":32.3,"p99_us":53.8,"max_us":33251.1,"errors":0,"retries":0},"retries":0,"errors":0},{"engine":"turso","workers":1,"status":"ok","error":null,"secs":5.000799,"total_ops":248185,"ops_per_sec":49629.0692747299,"reads":{"ops":198697,"secs":5.000799,"ops_per_sec":39733.05065850477,"mean_us":8.220180475802403,"p50_us":5.0,"p95_us":21.1,"p99_us":36.300000000000004,"max_us":761.4,"errors":0,"retries":0},"writes":{"ops":49488,"secs":5.000799,"ops_per_sec":9896.018616225128,"mean_us":67.44843396378904,"p50_us":29.5,"p95_us":71.4,"p99_us":122.9,"max_us":47333.5,"errors":0,"retries":0},"retries":0,"errors":0},{"engine":"turso-mvcc","workers":1,"status":"ok","error":null,"secs":5.0022072,"total_ops":362683,"ops_per_sec":72504.59357221349,"reads":{"ops":290313,"secs":5.0022072,"ops_per_sec":58036.98015548017,"mean_us":7.4724087450403465,"p50_us":5.699999999999999,"p95_us":16.4,"p99_us":26.1,"max_us":3030.1,"errors":0,"retries":0},"writes":{"ops":72370,"secs":5.0022072,"ops_per_sec":14467.613416733317,"mean_us":38.60200497443589,"p50_us":29.0,"p95_us":54.0,"p99_us":90.4,"max_us":133515.0,"errors":0,"retries":0},"retries":0,"errors":0},{"engine":"sqlite","workers":2,"status":"ok","error":null,"secs":5.0254902,"total_ops":284355,"ops_per_sec":56582.539948043275,"reads":{"ops":227543,"secs":5.0254902,"ops_per_sec":45277.77210668921,"mean_us":10.577371310039185,"p50_us":7.6,"p95_us":21.6,"p99_us":50.4,"max_us":15181.2,"errors":0,"retries":0},"writes":{"ops":56812,"secs":5.0254902,"ops_per_sec":11304.767841354063,"mean_us":132.9429222699424,"p50_us":19.1,"p95_us":51.3,"p99_us":1861.1999999999998,"max_us":93136.8,"errors":0,"retries":0},"retries":0,"errors":0},{"engine":"turso","workers":2,"status":"ok","error":null,"secs":5.0134662,"total_ops":136818,"ops_per_sec":27290.101207823045,"reads":{"ops":109403,"secs":5.0134662,"ops_per_sec":21821.828578399512,"mean_us":25.330027512956867,"p50_us":22.7,"p95_us":51.9,"p99_us":80.9,"max_us":1819.6,"errors":0,"retries":0},"writes":{"ops":27415,"secs":5.0134662,"ops_per_sec":5468.272629423532,"mean_us":263.08876162684624,"p50_us":75.0,"p95_us":215.2,"p99_us":3199.6,"max_us":78251.4,"errors":0,"retries":0},"retries":0,"errors":0},{"engine":"turso-mvcc","workers":2,"status":"ok","error":null,"secs":5.0036832,"total_ops":317806,"ops_per_sec":63514.412742996996,"reads":{"ops":254227,"secs":5.0036832,"ops_per_sec":50807.972814905625,"mean_us":9.303495694788747,"p50_us":6.8,"p95_us":19.1,"p99_us":32.3,"max_us":179179.5,"errors":0,"retries":0},"writes":{"ops":63579,"secs":5.0036832,"ops_per_sec":12706.43992809137,"mean_us":119.56227056103269,"p50_us":31.7,"p95_us":65.2,"p99_us":106.2,"max_us":1718631.3,"errors":0,"retries":1},"retries":1,"errors":0},{"engine":"sqlite","workers":4,"status":"ok","error":null,"secs":5.1304874,"total_ops":256205,"ops_per_sec":49937.750553680344,"reads":{"ops":205009,"secs":5.1304874,"ops_per_sec":39958.97153942918,"mean_us":12.35329814788479,"p50_us":8.9,"p95_us":25.599999999999998,"p99_us":65.2,"max_us":2134.5,"errors":0,"retries":0},"writes":{"ops":51196,"secs":5.1304874,"ops_per_sec":9978.77901425116,"mean_us":342.0736463786228,"p50_us":21.3,"p95_us":63.89999999999999,"p99_us":2330.2000000000003,"max_us":561126.1,"errors":0,"retries":0},"retries":0,"errors":0},{"engine":"turso","workers":4,"status":"ok","error":null,"secs":5.0035538,"total_ops":169089,"ops_per_sec":33793.78073240664,"reads":{"ops":135275,"secs":5.0035538,"ops_per_sec":27035.78404613137,"mean_us":22.918553317318132,"p50_us":19.8,"p95_us":43.699999999999996,"p99_us":66.2,"max_us":1493.3,"errors":0,"retries":0},"writes":{"ops":33814,"secs":5.0035538,"ops_per_sec":6757.9966862752635,"mean_us":499.0551280534707,"p50_us":61.3,"p95_us":1152.3,"p99_us":8149.4,"max_us":178209.5,"errors":0,"retries":0},"retries":0,"errors":0},{"engine":"turso-mvcc","workers":4,"status":"ok","error":null,"secs":5.0063896,"total_ops":535505,"ops_per_sec":106964.30817130172,"reads":{"ops":428472,"secs":5.0063896,"ops_per_sec":85585.02917951091,"mean_us":16.10813075299905,"p50_us":10.8,"p95_us":28.4,"p99_us":46.0,"max_us":229278.19999999998,"errors":0,"retries":0},"writes":{"ops":107033,"secs":5.0063896,"ops_per_sec":21379.27899179081,"mean_us":121.72992535012506,"p50_us":58.1,"p95_us":362.59999999999997,"p99_us":840.1,"max_us":228955.6,"errors":0,"retries":24},"retries":24,"errors":0},{"engine":"sqlite","workers":8,"status":"ok","error":null,"secs":5.1283022,"total_ops":267854,"ops_per_sec":52230.5413280832,"reads":{"ops":214274,"secs":5.1283022,"ops_per_sec":41782.639096424544,"mean_us":11.696702353062287,"p50_us":7.9,"p95_us":24.0,"p99_us":62.3,"max_us":15599.699999999999,"errors":0,"retries":0},"writes":{"ops":53580,"secs":5.1283022,"ops_per_sec":10447.902231658656,"mean_us":701.8540742814489,"p50_us":19.2,"p95_us":59.5,"p99_us":4673.3,"max_us":1087597.4,"errors":0,"retries":0},"retries":0,"errors":0},{"engine":"turso","workers":8,"status":"ok","error":null,"secs":5.0085852,"total_ops":180197,"ops_per_sec":35977.624978806394,"reads":{"ops":144249,"secs":5.0085852,"ops_per_sec":28800.348649355114,"mean_us":23.651014565093796,"p50_us":19.3,"p95_us":44.9,"p99_us":65.6,"max_us":12542.3,"errors":0,"retries":0},"writes":{"ops":35948,"secs":5.0085852,"ops_per_sec":7177.27632945128,"mean_us":1014.4799905418944,"p50_us":60.8,"p95_us":3128.3,"p99_us":18140.5,"max_us":328144.8,"errors":0,"retries":0},"retries":0,"errors":0},{"engine":"turso-mvcc","workers":8,"status":"ok","error":null,"secs":5.0111473,"total_ops":892730,"ops_per_sec":178148.82432212678,"reads":{"ops":713827,"secs":5.0111473,"ops_per_sec":142447.81828704177,"mean_us":19.45920720285881,"p50_us":15.8,"p95_us":41.8,"p99_us":67.0,"max_us":3931.9000000000005,"errors":0,"retries":0},"writes":{"ops":178903,"secs":5.0111473,"ops_per_sec":35701.00603508502,"mean_us":145.25804877503202,"p50_us":99.7,"p95_us":380.5,"p99_us":689.9,"max_us":23461.1,"errors":0,"retries":14},"retries":14,"errors":0}]};
+
+/* ---------- helpers ---------- */
+const NS = 'http://www.w3.org/2000/svg';
+function h(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v; else e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) { if (k == null) continue; e.append(k.nodeType ? k : document.createTextNode(k)); }
+  return e;
+}
+function s(tag, attrs = {}, ...kids) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  for (const k of kids.flat()) { if (k == null) continue; e.append(k.nodeType ? k : document.createTextNode(k)); }
+  return e;
+}
+const SLOT = { 'sqlite': 1, 'turso': 2, 'turso-mvcc': 3 };
+const colorOf = id => `var(--s${SLOT[id] || 1})`;
+const ENG = D.meta.engines;
+const labelOf = id => (ENG.find(e => e.id === id) || { label: id }).label;
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function fmtN(n) {
+  if (n == null || !isFinite(n)) return '–';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e4) return (n / 1e3).toFixed(1) + 'k';
+  if (n >= 100) return Math.round(n).toLocaleString('en-US');
+  if (n >= 10) return n.toFixed(1);
+  return n.toFixed(2);
+}
+function fmtT(us) {
+  if (us == null || !isFinite(us)) return '–';
+  if (us < 1) return us.toFixed(2) + ' µs';
+  if (us < 100) return us.toFixed(1) + ' µs';
+  if (us < 1000) return Math.round(us) + ' µs';
+  if (us < 1e6) return (us / 1000).toFixed(us < 1e4 ? 2 : 1) + ' ms';
+  return (us / 1e6).toFixed(2) + ' s';
+}
+const fmtX = r => (r >= 10 ? r.toFixed(1) : r.toFixed(2)) + '×';
+const geomean = a => Math.exp(a.reduce((t, x) => t + Math.log(x), 0) / a.length);
+
+const tip = h('div', { class: 'tip', role: 'tooltip' });
+document.body.append(tip);
+function showTip(ev, html) {
+  tip.innerHTML = html; tip.style.display = 'block';
+  const r = tip.getBoundingClientRect();
+  let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - 14;
+  if (y + r.height > innerHeight - 8) y = ev.clientY - r.height - 14;
+  tip.style.left = Math.max(8, x) + 'px'; tip.style.top = Math.max(8, y) + 'px';
+}
+const hideTip = () => { tip.style.display = 'none'; };
+const hd = id => `<div class="hd"><span class="sw" style="background:${colorOf(id)}"></span><b>${esc(labelOf(id))}</b></div>`;
+const trow = (k, v) => `<div class="row"><span>${esc(k)}</span><span>${v}</span></div>`;
+
+/* ---------- data shaping ---------- */
+const workloads = [];            // ordered [{name,title,description,basis,unit,by:{engine:result}}]
+for (const r of D.workloads) {
+  let w = workloads.find(x => x.name === r.workload);
+  if (!w) { w = { name: r.workload, title: r.title, description: r.description, basis: r.latency_basis, unit: r.unit, by: {} }; workloads.push(w); }
+  w.by[r.engine] = r;
+}
+const hasBase = ENG.some(e => e.id === 'sqlite');
+const ok = r => r && r.status === 'ok' && r.metric;
+const ratioVsBase = (w, id) => (hasBase && ok(w.by.sqlite) && ok(w.by[id]) && w.by.sqlite.metric.ops_per_sec > 0)
+  ? w.by[id].metric.ops_per_sec / w.by.sqlite.metric.ops_per_sec : null;
+
+/* ---------- header, legend, tiles ---------- */
+(function header() {
+  const m = D.meta;
+  const when = new Date(m.generated_unix * 1000).toLocaleString();
+  $('meta-line').textContent = `${when} · ${m.cpus} CPUs · ${m.os}/${m.arch} · SQLite ${m.sqlite_version} · Turso ${m.turso_version} · synchronous=${m.config.synchronous} · ${m.config.rows.toLocaleString('en-US')} rows`;
+  const lg = $('legend');
+  for (const e of ENG) lg.append(h('span', { title: e.description }, h('i', { class: 'sw', style: `background:${colorOf(e.id)}` }), e.label));
+  $('theme').onclick = () => {
+    const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+  };
+  $('dl').onclick = () => {
+    const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(D, null, 2)], { type: 'application/json' })), download: 'results.json' });
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+})();
+function $(id) { return document.getElementById(id); }
+
+(function tiles() {
+  const host = $('tiles');
+  if (!hasBase) { host.append(h('div', { class: 'notice' }, 'SQLite was not part of this run, so no relative comparison is shown.')); return; }
+  for (const e of ENG.filter(x => x.id !== 'sqlite')) {
+    const rs = workloads.map(w => ratioVsBase(w, e.id)).filter(r => r != null);
+    const tile = h('div', { class: 'tile' });
+    tile.append(h('div', { class: 'k' }, h('i', { class: 'sw', style: `background:${colorOf(e.id)}` }), `${e.label} vs SQLite`));
+    if (rs.length) {
+      const wins = rs.filter(r => r > 1).length;
+      tile.append(h('div', { class: 'v' }, fmtX(geomean(rs))));
+      tile.append(h('div', { class: 'muted' }, `geometric-mean throughput · faster on ${wins} of ${rs.length} workloads`));
+    } else {
+      tile.append(h('div', { class: 'v' }, '–'));
+      tile.append(h('div', { class: 'muted' }, 'no workload completed on both engines'));
+    }
+    host.append(tile);
+  }
+  const bad = [...D.workloads.filter(r => r.status !== 'ok').map(r => `${labelOf(r.engine)} · ${r.title}: ${r.error}`),
+               ...D.concurrency.filter(r => r.status !== 'ok').map(r => `${labelOf(r.engine)} · ${r.workers} workers: ${r.error}`)];
+  if (bad.length) {
+    const box = h('div', { class: 'notice' }, h('b', {}, `⚠ ${bad.length} run${bad.length > 1 ? 's' : ''} failed. `), 'Failed runs are left out of charts and averages.');
+    const ul = h('ul', { class: 'notes' }); bad.forEach(b => ul.append(h('li', {}, b))); box.append(ul);
+    $('failures').append(box);
+  }
+})();
+
+/* ---------- throughput cards (horizontal bars) ---------- */
+function barCard(w) {
+  const card = h('div', { class: 'card' }, h('h3', {}, w.title), h('p', { class: 'muted' }, w.description));
+  const eng = ENG.filter(e => w.by[e.id]);
+  const max = Math.max(1e-9, ...eng.filter(e => ok(w.by[e.id])).map(e => w.by[e.id].metric.ops_per_sec));
+  const W = 380, rowH = 32, bh = 18, labelW = 104, valW = 128, barMax = W - labelW - valW;
+  const svg = s('svg', { viewBox: `0 0 ${W} ${eng.length * rowH}`, role: 'img', 'aria-label': `${w.title} throughput by engine` });
+  eng.forEach((e, i) => {
+    const r = w.by[e.id], y = i * rowH + (rowH - bh) / 2;
+    svg.append(s('rect', { x: 0, y: y + 4, width: 10, height: 10, rx: 3, fill: colorOf(e.id) }));
+    svg.append(s('text', { x: 17, y: y + 14 }, e.label));
+    if (ok(r)) {
+      const bw = Math.max(8, r.metric.ops_per_sec / max * barMax);
+      svg.append(s('path', { d: `M${labelW},${y} h${bw - 4} a4,4 0 0 1 4,4 v${bh - 8} a4,4 0 0 1 -4,4 h-${bw - 4} z`, fill: colorOf(e.id) }));
+      const t = s('text', { x: labelW + bw + 7, y: y + 13.5, class: 'val' }, fmtN(r.metric.ops_per_sec));
+      const ra = e.id === 'sqlite' ? null : ratioVsBase(w, e.id);
+      if (ra != null) t.append(s('tspan', { class: 'ratio', dx: 6 }, fmtX(ra)));
+      svg.append(t);
+    } else {
+      svg.append(s('text', { x: labelW, y: y + 13.5 }, '⚠ failed'));
+    }
+    const hit = s('rect', { x: 0, y: i * rowH, width: W, height: rowH, fill: 'transparent', tabindex: 0 });
+    const html = () => {
+      if (!ok(r)) return hd(e.id) + trow('Status', 'failed') + `<div class="muted">${esc(r.error || '')}</div>`;
+      const m = r.metric, ra = e.id === 'sqlite' ? null : ratioVsBase(w, e.id);
+      return hd(e.id) + trow('Throughput', `${fmtN(m.ops_per_sec)} ${esc(w.unit)}`) + (ra != null ? trow('vs SQLite', fmtX(ra)) : '') +
+        trow('p50', fmtT(m.p50_us)) + trow('p95', fmtT(m.p95_us)) + trow('p99', fmtT(m.p99_us)) + trow('max', fmtT(m.max_us)) +
+        trow('ops', m.ops.toLocaleString('en-US')) + trow('time', m.secs.toFixed(2) + ' s') + (m.errors ? trow('errors', m.errors) : '') +
+        `<div class="muted" style="margin-top:3px">latency ${esc(w.basis)}</div>`;
+    };
+    hit.addEventListener('mousemove', ev => showTip(ev, html()));
+    hit.addEventListener('mouseleave', hideTip);
+    hit.addEventListener('focus', () => { const b = hit.getBoundingClientRect(); showTip({ clientX: b.left + 20, clientY: b.top }, html()); });
+    hit.addEventListener('blur', hideTip);
+    svg.append(hit);
+  });
+  card.append(svg, h('p', { class: 'muted', style: 'margin-top:6px' }, `unit: ${w.unit}`));
+  return card;
+}
+workloads.forEach(w => $('cards').append(barCard(w)));
+
+/* ---------- sequential table ---------- */
+(function seqTable() {
+  const t = $('seq-table');
+  t.append(h('thead', {}, h('tr', {}, ...['Workload', 'Engine', 'Throughput', 'vs SQLite', 'p50', 'p95', 'p99', 'max', 'Errors', 'Latency basis'].map(x => h('th', {}, x)))));
+  const tb = h('tbody');
+  for (const w of workloads) {
+    const okRows = ENG.filter(e => ok(w.by[e.id]));
+    const best = (f, low) => { const vs = okRows.map(e => f(w.by[e.id].metric)); return vs.length > 1 ? (low ? Math.min(...vs) : Math.max(...vs)) : null; };
+    const b = { ops: best(m => m.ops_per_sec, false), p50: best(m => m.p50_us, true), p95: best(m => m.p95_us, true), p99: best(m => m.p99_us, true) };
+    ENG.filter(e => w.by[e.id]).forEach((e, i) => {
+      const r = w.by[e.id], tr = h('tr', i === 0 ? { class: 'grp' } : {});
+      tr.append(h('td', {}, i === 0 ? w.title : ''), h('td', {}, h('span', { class: 'eng' }, h('i', { class: 'sw', style: `background:${colorOf(e.id)}` }), e.label)));
+      if (!ok(r)) { tr.append(h('td', { class: 'na', colspan: 7 }, '⚠ failed: ' + (r.error || '')), h('td', {}, ''), h('td', {}, w.basis)); tb.append(tr); return; }
+      const m = r.metric, ra = e.id === 'sqlite' ? null : ratioVsBase(w, e.id), cell = (v, key, f) => h('td', { class: b[key] != null && v === b[key] ? 'best' : '' }, f(v));
+      tr.append(cell(m.ops_per_sec, 'ops', v => `${fmtN(v)} ${w.unit}`), h('td', { class: ra == null ? 'na' : '' }, ra == null ? '–' : fmtX(ra)),
+        cell(m.p50_us, 'p50', fmtT), cell(m.p95_us, 'p95', fmtT), cell(m.p99_us, 'p99', fmtT), h('td', {}, fmtT(m.max_us)),
+        h('td', { class: m.errors ? '' : 'na' }, m.errors || '0'), h('td', { class: 'na' }, w.basis));
+      tb.append(tr);
+    });
+  }
+  t.append(tb);
+})();
+
+/* ---------- concurrency ---------- */
+const levels = [...new Set(D.concurrency.map(r => r.workers))].sort((a, b) => a - b);
+const cget = (id, wk) => D.concurrency.find(r => r.engine === id && r.workers === wk);
+$('conc-desc').textContent = `${D.meta.config.read_pct}% point reads / ${100 - D.meta.config.read_pct}% single-row UPDATE transactions on random rows, ${D.meta.config.duration_secs}s per level, ${D.meta.config.conc_rows.toLocaleString('en-US')} rows. Each worker has its own connection.`;
+
+function niceMax(v) {
+  v *= 1.06; const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+function lineChart(host, { fmtY, get }) {
+  host.innerHTML = '';
+  const series = ENG.map(e => ({ id: e.id, pts: levels.map(wk => { const r = cget(e.id, wk); const y = r && r.status === 'ok' ? get(r) : null; return y == null || !isFinite(y) ? null : y; }) }));
+  const vals = series.flatMap(x => x.pts).filter(v => v != null);
+  if (!vals.length) { host.append(h('p', { class: 'muted' }, 'No data.')); return; }
+  const W = Math.max(300, host.clientWidth), H = 240, m = { l: 54, r: 92, t: 12, b: 40 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, maxY = niceMax(Math.max(...vals));
+  const X = i => m.l + (levels.length === 1 ? iw / 2 : i * iw / (levels.length - 1));
+  const Y = v => m.t + ih - v / maxY * ih;
+  const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img' });
+  for (let i = 0; i <= 4; i++) {
+    const v = maxY * i / 4, y = Y(v);
+    svg.append(s('line', { x1: m.l, x2: W - m.r, y1: y, y2: y, class: 'grid' }));
+    svg.append(s('text', { x: m.l - 8, y: y + 4, 'text-anchor': 'end', class: 'axis' }, fmtY(v)));
+  }
+  levels.forEach((wk, i) => svg.append(s('text', { x: X(i), y: H - m.b + 18, 'text-anchor': 'middle', class: 'axis' }, wk)));
+  svg.append(s('text', { x: m.l + iw / 2, y: H - 4, 'text-anchor': 'middle', class: 'axis' }, 'workers'));
+  const ends = [];
+  for (const sr of series) {
+    let d = '', pen = false;
+    sr.pts.forEach((v, i) => { if (v == null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${X(i)},${Y(v)} `; pen = true; });
+    if (d) svg.append(s('path', { d, fill: 'none', stroke: colorOf(sr.id), 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+    sr.pts.forEach((v, i) => v != null && svg.append(s('circle', { cx: X(i), cy: Y(v), r: 4, fill: colorOf(sr.id), stroke: 'var(--surface-2)', 'stroke-width': 2 })));
+    const li = sr.pts.map((v, i) => v != null ? i : -1).filter(i => i >= 0).pop();
+    if (li != null) ends.push({ id: sr.id, y: Y(sr.pts[li]), x: X(li) });
+  }
+  ends.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+  ends.forEach(e => svg.append(s('text', { x: e.x + 10, y: e.y + 4 }, labelOf(e.id))));
+  const cross = s('line', { y1: m.t, y2: m.t + ih, stroke: 'var(--text-muted)', 'stroke-width': 1, 'stroke-dasharray': '3 3', visibility: 'hidden' });
+  svg.append(cross);
+  const ov = s('rect', { x: m.l - 10, y: m.t, width: iw + 20, height: ih, fill: 'transparent' });
+  ov.addEventListener('mousemove', ev => {
+    const bb = svg.getBoundingClientRect(), px = (ev.clientX - bb.left) * (W / bb.width);
+    let bi = 0, bd = 1e9; levels.forEach((_, i) => { const d = Math.abs(X(i) - px); if (d < bd) { bd = d; bi = i; } });
+    cross.setAttribute('x1', X(bi)); cross.setAttribute('x2', X(bi)); cross.setAttribute('visibility', 'visible');
+    const rows = series.filter(x => x.pts[bi] != null).sort((a, b) => b.pts[bi] - a.pts[bi]);
+    showTip(ev, `<div class="hd"><b>${levels[bi]} worker${levels[bi] > 1 ? 's' : ''}</b></div>` +
+      rows.map(x => `<div class="row"><span><span class="sw" style="background:${colorOf(x.id)};margin-right:6px"></span>${esc(labelOf(x.id))}</span><span>${fmtY(x.pts[bi])}</span></div>`).join(''));
+  });
+  ov.addEventListener('mouseleave', () => { hideTip(); cross.setAttribute('visibility', 'hidden'); });
+  svg.append(ov);
+  host.append(svg);
+}
+const drawConc = () => {
+  lineChart($('c-ops'), { fmtY: v => fmtN(v), get: r => r.ops_per_sec });
+  lineChart($('c-rp99'), { fmtY: fmtT, get: r => r.reads && r.reads.ops ? r.reads.p99_us : null });
+  lineChart($('c-wp99'), { fmtY: fmtT, get: r => r.writes && r.writes.ops ? r.writes.p99_us : null });
+};
+drawConc();
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawConc, 120); });
+
+(function concTable() {
+  const t = $('conc-table');
+  t.append(h('thead', {}, h('tr', {}, ...['Workers', 'Engine', 'Total ops/s', 'Reads/s', 'Writes/s', 'Read p50', 'Read p99', 'Write p50', 'Write p99', 'Retries', 'Errors'].map(x => h('th', {}, x)))));
+  const tb = h('tbody');
+  for (const wk of levels) {
+    const okE = ENG.filter(e => { const r = cget(e.id, wk); return r && r.status === 'ok'; });
+    const bestOps = okE.length > 1 ? Math.max(...okE.map(e => cget(e.id, wk).ops_per_sec)) : null;
+    ENG.forEach((e, i) => {
+      const r = cget(e.id, wk); if (!r) return;
+      const tr = h('tr', i === 0 ? { class: 'grp' } : {});
+      tr.append(h('td', {}, i === 0 ? wk : ''), h('td', {}, h('span', { class: 'eng' }, h('i', { class: 'sw', style: `background:${colorOf(e.id)}` }), e.label)));
+      if (r.status !== 'ok') { tr.append(h('td', { class: 'na', colspan: 9 }, '⚠ failed: ' + (r.error || ''))); tb.append(tr); return; }
+      const rs = r.reads ? r.reads.ops / r.secs : 0, ws = r.writes ? r.writes.ops / r.secs : 0;
+      tr.append(h('td', { class: bestOps != null && r.ops_per_sec === bestOps ? 'best' : '' }, fmtN(r.ops_per_sec)), h('td', {}, fmtN(rs)), h('td', {}, fmtN(ws)),
+        h('td', {}, r.reads && r.reads.ops ? fmtT(r.reads.p50_us) : '–'), h('td', {}, r.reads && r.reads.ops ? fmtT(r.reads.p99_us) : '–'),
+        h('td', {}, r.writes && r.writes.ops ? fmtT(r.writes.p50_us) : '–'), h('td', {}, r.writes && r.writes.ops ? fmtT(r.writes.p99_us) : '–'),
+        h('td', { class: r.retries ? '' : 'na' }, r.retries.toLocaleString('en-US')), h('td', { class: r.errors ? '' : 'na', title: r.error || '' }, r.errors.toLocaleString('en-US')));
+      tb.append(tr);
+    });
+  }
+  t.append(tb);
+})();
+
+/* ---------- config & notes ---------- */
+(function cfg() {
+  const t = $('cfg-table'), tb = h('tbody');
+  const rows = [...Object.entries(D.meta.config).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : String(v)]), ['scratch dir', D.meta.db_dir]];
+  rows.forEach(([k, v]) => tb.append(h('tr', {}, h('td', {}, h('code', {}, k)), h('td', { style: 'text-align:left' }, v))));
+  ENG.forEach(e => tb.append(h('tr', {}, h('td', {}, h('span', { class: 'eng' }, h('i', { class: 'sw', style: `background:${colorOf(e.id)}` }), e.label)), h('td', { style: 'text-align:left' }, e.description))));
+  t.append(tb);
+  const ul = $('notes');
+  const generic = [
+    'Results depend on this machine and its storage. Durable commits are fsync-bound, so autocommit and write-heavy numbers move a lot between disks (and RAM-backed temp dirs make them look unrealistically fast). Re-run on your target hardware with --dir pointing at the real disk.',
+    `PRAGMA synchronous is set to "${D.meta.config.synchronous}" on every connection of every engine.`,
+    'Turso Database is a young, pre-1.0 engine and MVCC / BEGIN CONCURRENT is experimental; behaviour and performance may change between releases.',
+    'SQLite runs one OS thread per worker; Turso runs one async task per worker on the tokio runtime. Both use their natural API: SQLite binds borrowed text, Turso takes owned values.',
+    'All engines receive identical data and an identical access pattern (fixed RNG seed). Statements are prepared and cached per connection.',
+    'Single-run numbers carry noise; repeat runs before drawing fine-grained conclusions.',
+  ];
+  [...generic, ...D.meta.notes].forEach(n => ul.append(h('li', {}, n)));
+})();
+</script>
+</body>
+</html>
