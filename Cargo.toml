@@ -1,0 +1,21 @@
+[package]
+name = "dbbench"
+version = "0.1.0"
+edition = "2021"
+description = "Stress test / benchmark: SQLite (rusqlite) vs Turso Database, with an HTML stats report"
+
+[dependencies]
+rusqlite = { version = "0.40", features = ["bundled"] }
+turso = "0.8.3-pre.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.9"
+tempfile = "3"
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+debug = false

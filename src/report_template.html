@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQLite vs Turso benchmark</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --surface-2: #f4f3f0;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #77766f;
+  --grid: #e4e3de;
+  --border: #dcdbd5;
+  --s1: #2a78d6; /* sqlite */
+  --s2: #eb6834; /* turso */
+  --s3: #1baf7a; /* turso mvcc */
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --surface-2: #232321;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #96958b;
+    --grid: #2f2f2c;
+    --border: #3a3a36;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --surface-2: #232321;
+  --text-primary: #f0efec;
+  --text-secondary: #c3c2b7;
+  --text-muted: #96958b;
+  --grid: #2f2f2c;
+  --border: #3a3a36;
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+}
+* { box-sizing: border-box; }
+html { background: var(--surface-1); }
+body {
+  margin: 0; padding: 0 16px 64px;
+  background: var(--surface-1); color: var(--text-primary);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.wrap { max-width: 1120px; margin: 0 auto; }
+header { padding: 32px 0 8px; display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+h1 { font-size: 26px; line-height: 1.2; margin: 0 0 6px; font-weight: 650; letter-spacing: -0.01em; }
+h2 { font-size: 18px; margin: 40px 0 4px; font-weight: 650; }
+h3 { font-size: 14px; margin: 0 0 2px; font-weight: 600; }
+.sub, .muted { color: var(--text-secondary); margin: 0; }
+.muted { color: var(--text-muted); font-size: 12.5px; }
+.toolbar { display: flex; gap: 8px; }
+button {
+  font: inherit; color: var(--text-primary); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--text-muted); }
+button:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; margin: 14px 0 0; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 20px; }
+.tile { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+.tile .k { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 13px; }
+.tile .v { font-size: 38px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
+.notice { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; background: var(--surface-2); color: var(--text-secondary); }
+.notice b { color: var(--text-primary); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; margin-top: 14px; }
+.card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px 10px; min-width: 0; }
+.card p { margin: 0 0 8px; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; fill: var(--text-secondary); }
+svg text.val { fill: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+svg text.ratio { fill: var(--text-muted); font-weight: 400; }
+svg text.axis { fill: var(--text-muted); font-size: 11.5px; }
+svg .grid { stroke: var(--grid); stroke-width: 1; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin-top: 14px; }
+.chart-host { min-height: 240px; }
+.tablewrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--border); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+th { font-weight: 600; color: var(--text-secondary); background: var(--surface-2); font-size: 12.5px; position: sticky; top: 0; }
+tr:last-child td { border-bottom: 0; }
+tr.grp td { border-top: 2px solid var(--border); }
+td.best { font-weight: 650; color: var(--text-primary); }
+td.na { color: var(--text-muted); }
+.eng { display: inline-flex; align-items: center; gap: 7px; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--text-secondary); }
+ul.notes { margin: 8px 0 0; padding-left: 20px; color: var(--text-secondary); }
+ul.notes li { margin: 4px 0; }
+code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+.tip {
+  position: fixed; z-index: 10; display: none; pointer-events: none; max-width: 300px;
+  background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 20px rgba(0,0,0,.18); font-size: 12.5px;
+}
+.tip b { font-weight: 650; }
+.tip .row { display: flex; justify-content: space-between; gap: 16px; }
+.tip .row span:first-child { color: var(--text-secondary); }
+.tip .hd { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+@media (max-width: 520px) { h1 { font-size: 22px; } .tile .v { font-size: 32px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>SQLite vs Turso — benchmark report</h1>
+      <p class="sub" id="meta-line"></p>
+      <div class="legend" id="legend" aria-label="Legend"></div>
+    </div>
+    <div class="toolbar">
+      <button id="theme" type="button">Toggle theme</button>
+      <button id="dl" type="button">Download results.json</button>
+    </div>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+  <div id="failures"></div>
+
+  <h2>Throughput by workload</h2>
+  <p class="muted">Single connection, sequential. Longer bar = more operations per second. Each card has its own scale, so compare bars within a card.</p>
+  <div class="cards" id="cards"></div>
+
+  <h2>Latency &amp; detail</h2>
+  <p class="muted">Bold = best in its workload. Latency basis differs per workload (see the last column). Lower latency is better.</p>
+  <div class="tablewrap"><table id="seq-table"></table></div>
+
+  <h2>Concurrent mixed workload</h2>
+  <p class="muted" id="conc-desc"></p>
+  <div class="charts">
+    <div class="card"><h3>Total throughput</h3><p class="muted">Operations per second across all workers</p><div class="chart-host" id="c-ops"></div></div>
+    <div class="card"><h3>Read latency, p99</h3><p class="muted">Point read, lower is better</p><div class="chart-host" id="c-rp99"></div></div>
+    <div class="card"><h3>Write latency, p99</h3><p class="muted">Single-row UPDATE transaction including retries, lower is better</p><div class="chart-host" id="c-wp99"></div></div>
+  </div>
+  <div class="tablewrap"><table id="conc-table"></table></div>
+
+  <h2>Setup &amp; caveats</h2>
+  <details open>
+    <summary>Configuration</summary>
+    <div class="tablewrap"><table id="cfg-table"></table></div>
+  </details>
+  <details open>
+    <summary>Notes</summary>
+    <ul class="notes" id="notes"></ul>
+  </details>
+</div>
+
+<script>
+const D = /*__DATA__*/null;
+
+/* ---------- helpers ---------- */
+const NS = 'http://www.w3.org/2000/svg';
+function h(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v; else e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) { if (k == null) continue; e.append(k.nodeType ? k : document.createTextNode(k)); }
+  return e;
+}
+function s(tag, attrs = {}, ...kids) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  for (const k of kids.flat()) { if (k == null) continue; e.append(k.nodeType ? k : document.createTextNode(k)); }
+  return e;
+}
+const SLOT = { 'sqlite': 1, 'turso': 2, 'turso-mvcc': 3 };
+const colorOf = id => `var(--s${SLOT[id] || 1})`;
+const ENG = D.meta.engines;
+const labelOf = id => (ENG.find(e => e.id === id) || { label: id }).label;
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function fmtN(n) {
+  if (n == null || !isFinite(n)) return '–';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e4) return (n / 1e3).toFixed(1) + 'k';
+  if (n >= 100) return Math.round(n).toLocaleString('en-US');
+  if (n >= 10) return n.toFixed(1);
+  return n.toFixed(2);
+}
+function fmtT(us) {
+  if (us == null || !isFinite(us)) return '–';
+  if (us < 1) return us.toFixed(2) + ' µs';
+  if (us < 100) return us.toFixed(1) + ' µs';
+  if (us < 1000) return Math.round(us) + ' µs';
+  if (us < 1e6) return (us / 1000).toFixed(us < 1e4 ? 2 : 1) + ' ms';
+  return (us / 1e6).toFixed(2) + ' s';
+}
+const fmtX = r => (r >= 10 ? r.toFixed(1) : r.toFixed(2)) + '×';
+const geomean = a => Math.exp(a.reduce((t, x) => t + Math.log(x), 0) / a.length);
+
+const tip = h('div', { class: 'tip', role: 'tooltip' });
+document.body.append(tip);
+function showTip(ev, html) {
+  tip.innerHTML = html; tip.style.display = 'block';
+  const r = tip.getBoundingClientRect();
+  let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - 14;
+  if (y + r.height > innerHeight - 8) y = ev.clientY - r.height - 14;
+  tip.style.left = Math.max(8, x) + 'px'; tip.style.top = Math.max(8, y) + 'px';
+}
+const hideTip = () => { tip.style.display = 'none'; };
+const hd = id => `<div class="hd"><span class="sw" style="background:${colorOf(id)}"></span><b>${esc(labelOf(id))}</b></div>`;
+const trow = (k, v) => `<div class="row"><span>${esc(k)}</span><span>${v}</span></div>`;
+
+/* ---------- data shaping ---------- */
+const workloads = [];            // ordered [{name,title,description,basis,unit,by:{engine:result}}]
+for (const r of D.workloads) {
+  let w = workloads.find(x => x.name === r.workload);
+  if (!w) { w = { name: r.workload, title: r.title, description: r.description, basis: r.latency_basis, unit: r.unit, by: {} }; workloads.push(w); }
+  w.by[r.engine] = r;
+}
+const hasBase = ENG.some(e => e.id === 'sqlite');
+const ok = r => r && r.status === 'ok' && r.metric;
+const ratioVsBase = (w, id) => (hasBase && ok(w.by.sqlite) && ok(w.by[id]) && w.by.sqlite.metric.ops_per_sec > 0)
+  ? w.by[id].metric.ops_per_sec / w.by.sqlite.metric.ops_per_sec : null;
+
+/* ---------- header, legend, tiles ---------- */
+(function header() {
+  const m = D.meta;
+  const when = new Date(m.generated_unix * 1000).toLocaleString();
+  $('meta-line').textContent = `${when} · ${m.cpus} CPUs · ${m.os}/${m.arch} · SQLite ${m.sqlite_version} · Turso ${m.turso_version} · synchronous=${m.config.synchronous} · ${m.config.rows.toLocaleString('en-US')} rows`;
+  const lg = $('legend');
+  for (const e of ENG) lg.append(h('span', { title: e.description }, h('i', { class: 'sw', style: `background:${colorOf(e.id)}` }), e.label));
+  $('theme').onclick = () => {
+    const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+  };
+  $('dl').onclick = () => {
+    const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(D, null, 2)], { type: 'application/json' })), download: 'results.json' });
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+})();
+function $(id) { return document.getElementById(id); }
+
+(function tiles() {
+  const host = $('tiles');
+  if (!hasBase) { host.append(h('div', { class: 'notice' }, 'SQLite was not part of this run, so no relative comparison is shown.')); return; }
+  for (const e of ENG.filter(x => x.id !== 'sqlite')) {
+    const rs = workloads.map(w => ratioVsBase(w, e.id)).filter(r => r != null);
+    const tile = h('div', { class: 'tile' });
+    tile.append(h('div', { class: 'k' }, h('i', { class: 'sw', style: `background:${colorOf(e.id)}` }), `${e.label} vs SQLite`));
+    if (rs.length) {
+      const wins = rs.filter(r => r > 1).length;
+      tile.append(h('div', { class: 'v' }, fmtX(geomean(rs))));
+      tile.append(h('div', { class: 'muted' }, `geometric-mean throughput · faster on ${wins} of ${rs.length} workloads`));
+    } else {
+      tile.append(h('div', { class: 'v' }, '–'));
+      tile.append(h('div', { class: 'muted' }, 'no workload completed on both engines'));
+    }
+    host.append(tile);
+  }
+  const bad = [...D.workloads.filter(r => r.status !== 'ok').map(r => `${labelOf(r.engine)} · ${r.title}: ${r.error}`),
+               ...D.concurrency.filter(r => r.status !== 'ok').map(r => `${labelOf(r.engine)} · ${r.workers} workers: ${r.error}`)];
+  if (bad.length) {
+    const box = h('div', { class: 'notice' }, h('b', {}, `⚠ ${bad.length} run${bad.length > 1 ? 's' : ''} failed. `), 'Failed runs are left out of charts and averages.');
+    const ul = h('ul', { class: 'notes' }); bad.forEach(b => ul.append(h('li', {}, b))); box.append(ul);
+    $('failures').append(box);
+  }
+})();
+
+/* ---------- throughput cards (horizontal bars) ---------- */
+function barCard(w) {
+  const card = h('div', { class: 'card' }, h('h3', {}, w.title), h('p', { class: 'muted' }, w.description));
+  const eng = ENG.filter(e => w.by[e.id]);
+  const max = Math.max(1e-9, ...eng.filter(e => ok(w.by[e.id])).map(e => w.by[e.id].metric.ops_per_sec));
+  const W = 380, rowH = 32, bh = 18, labelW = 104, valW = 128, barMax = W - labelW - valW;
+  const svg = s('svg', { viewBox: `0 0 ${W} ${eng.length * rowH}`, role: 'img', 'aria-label': `${w.title} throughput by engine` });
+  eng.forEach((e, i) => {
+    const r = w.by[e.id], y = i * rowH + (rowH - bh) / 2;
+    svg.append(s('rect', { x: 0, y: y + 4, width: 10, height: 10, rx: 3, fill: colorOf(e.id) }));
+    svg.append(s('text', { x: 17, y: y + 14 }, e.label));
+    if (ok(r)) {
+      const bw = Math.max(8, r.metric.ops_per_sec / max * barMax);
+      svg.append(s('path', { d: `M${labelW},${y} h${bw - 4} a4,4 0 0 1 4,4 v${bh - 8} a4,4 0 0 1 -4,4 h-${bw - 4} z`, fill: colorOf(e.id) }));
+      const t = s('text', { x: labelW + bw + 7, y: y + 13.5, class: 'val' }, fmtN(r.metric.ops_per_sec));
+      const ra = e.id === 'sqlite' ? null : ratioVsBase(w, e.id);
+      if (ra != null) t.append(s('tspan', { class: 'ratio', dx: 6 }, fmtX(ra)));
+      svg.append(t);
+    } else {
+      svg.append(s('text', { x: labelW, y: y + 13.5 }, '⚠ failed'));
+    }
+    const hit = s('rect', { x: 0, y: i * rowH, width: W, height: rowH, fill: 'transparent', tabindex: 0 });
+    const html = () => {
+      if (!ok(r)) return hd(e.id) + trow('Status', 'failed') + `<div class="muted">${esc(r.error || '')}</div>`;
+      const m = r.metric, ra = e.id === 'sqlite' ? null : ratioVsBase(w, e.id);
+      return hd(e.id) + trow('Throughput', `${fmtN(m.ops_per_sec)} ${esc(w.unit)}`) + (ra != null ? trow('vs SQLite', fmtX(ra)) : '') +
+        trow('p50', fmtT(m.p50_us)) + trow('p95', fmtT(m.p95_us)) + trow('p99', fmtT(m.p99_us)) + trow('max', fmtT(m.max_us)) +
+        trow('ops', m.ops.toLocaleString('en-US')) + trow('time', m.secs.toFixed(2) + ' s') + (m.errors ? trow('errors', m.errors) : '') +
+        `<div class="muted" style="margin-top:3px">latency ${esc(w.basis)}</div>`;
+    };
+    hit.addEventListener('mousemove', ev => showTip(ev, html()));
+    hit.addEventListener('mouseleave', hideTip);
+    hit.addEventListener('focus', () => { const b = hit.getBoundingClientRect(); showTip({ clientX: b.left + 20, clientY: b.top }, html()); });
+    hit.addEventListener('blur', hideTip);
+    svg.append(hit);
+  });
+  card.append(svg, h('p', { class: 'muted', style: 'margin-top:6px' }, `unit: ${w.unit}`));
+  return card;
+}
+workloads.forEach(w => $('cards').append(barCard(w)));
+
+/* ---------- sequential table ---------- */
+(function seqTable() {
+  const t = $('seq-table');
+  t.append(h('thead', {}, h('tr', {}, ...['Workload', 'Engine', 'Throughput', 'vs SQLite', 'p50', 'p95', 'p99', 'max', 'Errors', 'Latency basis'].map(x => h('th', {}, x)))));
+  const tb = h('tbody');
+  for (const w of workloads) {
+    const okRows = ENG.filter(e => ok(w.by[e.id]));
+    const best = (f, low) => { const vs = okRows.map(e => f(w.by[e.id].metric)); return vs.length > 1 ? (low ? Math.min(...vs) : Math.max(...vs)) : null; };
+    const b = { ops: best(m => m.ops_per_sec, false), p50: best(m => m.p50_us, true), p95: best(m => m.p95_us, true), p99: best(m => m.p99_us, true) };
+    ENG.filter(e => w.by[e.id]).forEach((e, i) => {
+      const r = w.by[e.id], tr = h('tr', i === 0 ? { class: 'grp' } : {});
+      tr.append(h('td', {}, i === 0 ? w.title : ''), h('td', {}, h('span', { class: 'eng' }, h('i', { class: 'sw', style: `background:${colorOf(e.id)}` }), e.label)));
+      if (!ok(r)) { tr.append(h('td', { class: 'na', colspan: 7 }, '⚠ failed: ' + (r.error || '')), h('td', {}, ''), h('td', {}, w.basis)); tb.append(tr); return; }
+      const m = r.metric, ra = e.id === 'sqlite' ? null : ratioVsBase(w, e.id), cell = (v, key, f) => h('td', { class: b[key] != null && v === b[key] ? 'best' : '' }, f(v));
+      tr.append(cell(m.ops_per_sec, 'ops', v => `${fmtN(v)} ${w.unit}`), h('td', { class: ra == null ? 'na' : '' }, ra == null ? '–' : fmtX(ra)),
+        cell(m.p50_us, 'p50', fmtT), cell(m.p95_us, 'p95', fmtT), cell(m.p99_us, 'p99', fmtT), h('td', {}, fmtT(m.max_us)),
+        h('td', { class: m.errors ? '' : 'na' }, m.errors || '0'), h('td', { class: 'na' }, w.basis));
+      tb.append(tr);
+    });
+  }
+  t.append(tb);
+})();
+
+/* ---------- concurrency ---------- */
+const levels = [...new Set(D.concurrency.map(r => r.workers))].sort((a, b) => a - b);
+const cget = (id, wk) => D.concurrency.find(r => r.engine === id && r.workers === wk);
+$('conc-desc').textContent = `${D.meta.config.read_pct}% point reads / ${100 - D.meta.config.read_pct}% single-row UPDATE transactions on random rows, ${D.meta.config.duration_secs}s per level, ${D.meta.config.conc_rows.toLocaleString('en-US')} rows. Each worker has its own connection.`;
+
+function niceMax(v) {
+  v *= 1.06; const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+function lineChart(host, { fmtY, get }) {
+  host.innerHTML = '';
+  const series = ENG.map(e => ({ id: e.id, pts: levels.map(wk => { const r = cget(e.id, wk); const y = r && r.status === 'ok' ? get(r) : null; return y == null || !isFinite(y) ? null : y; }) }));
+  const vals = series.flatMap(x => x.pts).filter(v => v != null);
+  if (!vals.length) { host.append(h('p', { class: 'muted' }, 'No data.')); return; }
+  const W = Math.max(300, host.clientWidth), H = 240, m = { l: 54, r: 92, t: 12, b: 40 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, maxY = niceMax(Math.max(...vals));
+  const X = i => m.l + (levels.length === 1 ? iw / 2 : i * iw / (levels.length - 1));
+  const Y = v => m.t + ih - v / maxY * ih;
+  const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img' });
+  for (let i = 0; i <= 4; i++) {
+    const v = maxY * i / 4, y = Y(v);
+    svg.append(s('line', { x1: m.l, x2: W - m.r, y1: y, y2: y, class: 'grid' }));
+    svg.append(s('text', { x: m.l - 8, y: y + 4, 'text-anchor': 'end', class: 'axis' }, fmtY(v)));
+  }
+  levels.forEach((wk, i) => svg.append(s('text', { x: X(i), y: H - m.b + 18, 'text-anchor': 'middle', class: 'axis' }, wk)));
+  svg.append(s('text', { x: m.l + iw / 2, y: H - 4, 'text-anchor': 'middle', class: 'axis' }, 'workers'));
+  const ends = [];
+  for (const sr of series) {
+    let d = '', pen = false;
+    sr.pts.forEach((v, i) => { if (v == null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${X(i)},${Y(v)} `; pen = true; });
+    if (d) svg.append(s('path', { d, fill: 'none', stroke: colorOf(sr.id), 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+    sr.pts.forEach((v, i) => v != null && svg.append(s('circle', { cx: X(i), cy: Y(v), r: 4, fill: colorOf(sr.id), stroke: 'var(--surface-2)', 'stroke-width': 2 })));
+    const li = sr.pts.map((v, i) => v != null ? i : -1).filter(i => i >= 0).pop();
+    if (li != null) ends.push({ id: sr.id, y: Y(sr.pts[li]), x: X(li) });
+  }
+  ends.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+  ends.forEach(e => svg.append(s('text', { x: e.x + 10, y: e.y + 4 }, labelOf(e.id))));
+  const cross = s('line', { y1: m.t, y2: m.t + ih, stroke: 'var(--text-muted)', 'stroke-width': 1, 'stroke-dasharray': '3 3', visibility: 'hidden' });
+  svg.append(cross);
+  const ov = s('rect', { x: m.l - 10, y: m.t, width: iw + 20, height: ih, fill: 'transparent' });
+  ov.addEventListener('mousemove', ev => {
+    const bb = svg.getBoundingClientRect(), px = (ev.clientX - bb.left) * (W / bb.width);
+    let bi = 0, bd = 1e9; levels.forEach((_, i) => { const d = Math.abs(X(i) - px); if (d < bd) { bd = d; bi = i; } });
+    cross.setAttribute('x1', X(bi)); cross.setAttribute('x2', X(bi)); cross.setAttribute('visibility', 'visible');
+    const rows = series.filter(x => x.pts[bi] != null).sort((a, b) => b.pts[bi] - a.pts[bi]);
+    showTip(ev, `<div class="hd"><b>${levels[bi]} worker${levels[bi] > 1 ? 's' : ''}</b></div>` +
+      rows.map(x => `<div class="row"><span><span class="sw" style="background:${colorOf(x.id)};margin-right:6px"></span>${esc(labelOf(x.id))}</span><span>${fmtY(x.pts[bi])}</span></div>`).join(''));
+  });
+  ov.addEventListener('mouseleave', () => { hideTip(); cross.setAttribute('visibility', 'hidden'); });
+  svg.append(ov);
+  host.append(svg);
+}
+const drawConc = () => {
+  lineChart($('c-ops'), { fmtY: v => fmtN(v), get: r => r.ops_per_sec });
+  lineChart($('c-rp99'), { fmtY: fmtT, get: r => r.reads && r.reads.ops ? r.reads.p99_us : null });
+  lineChart($('c-wp99'), { fmtY: fmtT, get: r => r.writes && r.writes.ops ? r.writes.p99_us : null });
+};
+drawConc();
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawConc, 120); });
+
+(function concTable() {
+  const t = $('conc-table');
+  t.append(h('thead', {}, h('tr', {}, ...['Workers', 'Engine', 'Total ops/s', 'Reads/s', 'Writes/s', 'Read p50', 'Read p99', 'Write p50', 'Write p99', 'Retries', 'Errors'].map(x => h('th', {}, x)))));
+  const tb = h('tbody');
+  for (const wk of levels) {
+    const okE = ENG.filter(e => { const r = cget(e.id, wk); return r && r.status === 'ok'; });
+    const bestOps = okE.length > 1 ? Math.max(...okE.map(e => cget(e.id, wk).ops_per_sec)) : null;
+    ENG.forEach((e, i) => {
+      const r = cget(e.id, wk); if (!r) return;
+      const tr = h('tr', i === 0 ? { class: 'grp' } : {});
+      tr.append(h('td', {}, i === 0 ? wk : ''), h('td', {}, h('span', { class: 'eng' }, h('i', { class: 'sw', style: `background:${colorOf(e.id)}` }), e.label)));
+      if (r.status !== 'ok') { tr.append(h('td', { class: 'na', colspan: 9 }, '⚠ failed: ' + (r.error || ''))); tb.append(tr); return; }
+      const rs = r.reads ? r.reads.ops / r.secs : 0, ws = r.writes ? r.writes.ops / r.secs : 0;
+      tr.append(h('td', { class: bestOps != null && r.ops_per_sec === bestOps ? 'best' : '' }, fmtN(r.ops_per_sec)), h('td', {}, fmtN(rs)), h('td', {}, fmtN(ws)),
+        h('td', {}, r.reads && r.reads.ops ? fmtT(r.reads.p50_us) : '–'), h('td', {}, r.reads && r.reads.ops ? fmtT(r.reads.p99_us) : '–'),
+        h('td', {}, r.writes && r.writes.ops ? fmtT(r.writes.p50_us) : '–'), h('td', {}, r.writes && r.writes.ops ? fmtT(r.writes.p99_us) : '–'),
+        h('td', { class: r.retries ? '' : 'na' }, r.retries.toLocaleString('en-US')), h('td', { class: r.errors ? '' : 'na', title: r.error || '' }, r.errors.toLocaleString('en-US')));
+      tb.append(tr);
+    });
+  }
+  t.append(tb);
+})();
+
+/* ---------- config & notes ---------- */
+(function cfg() {
+  const t = $('cfg-table'), tb = h('tbody');
+  const rows = [...Object.entries(D.meta.config).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : String(v)]), ['scratch dir', D.meta.db_dir]];
+  rows.forEach(([k, v]) => tb.append(h('tr', {}, h('td', {}, h('code', {}, k)), h('td', { style: 'text-align:left' }, v))));
+  ENG.forEach(e => tb.append(h('tr', {}, h('td', {}, h('span', { class: 'eng' }, h('i', { class: 'sw', style: `background:${colorOf(e.id)}` }), e.label)), h('td', { style: 'text-align:left' }, e.description))));
+  t.append(tb);
+  const ul = $('notes');
+  const generic = [
+    'Results depend on this machine and its storage. Durable commits are fsync-bound, so autocommit and write-heavy numbers move a lot between disks (and RAM-backed temp dirs make them look unrealistically fast). Re-run on your target hardware with --dir pointing at the real disk.',
+    `PRAGMA synchronous is set to "${D.meta.config.synchronous}" on every connection of every engine.`,
+    'Turso Database is a young, pre-1.0 engine and MVCC / BEGIN CONCURRENT is experimental; behaviour and performance may change between releases.',
+    'SQLite runs one OS thread per worker; Turso runs one async task per worker on the tokio runtime. Both use their natural API: SQLite binds borrowed text, Turso takes owned values.',
+    'All engines receive identical data and an identical access pattern (fixed RNG seed). Statements are prepared and cached per connection.',
+    'Single-run numbers carry noise; repeat runs before drawing fine-grained conclusions.',
+  ];
+  [...generic, ...D.meta.notes].forEach(n => ul.append(h('li', {}, n)));
+})();
+</script>
+</body>
+</html>
